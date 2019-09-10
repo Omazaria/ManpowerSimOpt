@@ -8,6 +8,7 @@ module GAforManSim
     include(joinpath( dirname( Base.source_path() ), "..", "Functions", "mpInitGA.jl" )) #: "src" myid()==1?
     include(joinpath( dirname( Base.source_path() ), "Targets.jl" ))
     include(joinpath( dirname( Base.source_path() ), "Parameters.jl" ))
+    include(joinpath( dirname( Base.source_path() ), "..", "Functions", "ComputeFitness.jl" ))
     if myid()==1
         configFileName = joinpath( dirname( Base.source_path() ), "..", "..", "Data", "SIMULdemo.xlsx")
     else
@@ -15,12 +16,17 @@ module GAforManSim
     end
 
     InitMpSim = CreatSim( configFileName )
+    BestSol = Vector{Float64}()
+    AllSols = Vector{Float64}()
+
+    #export BestSol, AllSols
 
     import Base.isless
 
     mutable struct GAEngine <: Entity
         mpSim::ManpowerSimulation
         fitness
+        score
         Generation
 
         function GAEngine()
@@ -29,10 +35,26 @@ module GAforManSim
             for i in 1:length(ParametersList)
                 if ParametersList[i].Type == "RecFlow"
                     # Set recruitment flows
-                    setRecruitmentFixed(gamp.mpSim.recruitmentSchemes[ParametersList[i].Index], rand(ParametersList[i].Min:ParametersList[i].Max))
+                    if length(ParametersList[i].TimeDivision) > 2
+                        gamp.mpSim.recruitmentSchemes[ParametersList[i].Index].UseRecFlowArray = true
+                        gamp.mpSim.recruitmentSchemes[ParametersList[i].Index].RecFlowArray = Int.(zeros(gamp.mpSim.simLength/12 + 1))
+                        for div in 1:(length(ParametersList[i].TimeDivision)-1)
+                            gamp.mpSim.recruitmentSchemes[ParametersList[i].Index].RecFlowArray[ParametersList[i].TimeDivision[div] + 1:((ParametersList[i].TimeDivision[div + 1] == -1)? end : 1 + ParametersList[i].TimeDivision[div + 1])] = rand(ParametersList[i].Min:ParametersList[i].Max)
+                        end
+                    else
+                        setRecruitmentFixed(gamp.mpSim.recruitmentSchemes[ParametersList[i].Index], rand(ParametersList[i].Min:ParametersList[i].Max))
+                    end
                 elseif ParametersList[i].Type == "RecAge"
                     # Set recruitment age
-                    gamp.mpSim.recruitmentSchemes[ParametersList[i].Index].ageDist = function () return 12*(rand(ParametersList[i].Min:ParametersList[i].Max)) end
+                    if length(ParametersList[i].TimeDivision) > 2
+                        gamp.mpSim.recruitmentSchemes[ParametersList[i].Index].UseRecAgeArray = true
+                        gamp.mpSim.recruitmentSchemes[ParametersList[i].Index].RecAgeArray = Int.(zeros(gamp.mpSim.simLength/12 + 1))
+                        for div in 1:(length(ParametersList[i].TimeDivision) - 1)
+                            gamp.mpSim.recruitmentSchemes[ParametersList[i].Index].RecAgeArray[ParametersList[i].TimeDivision[div] + 1:((ParametersList[i].TimeDivision[div + 1] == -1)? end : 1+ParametersList[i].TimeDivision[i + 1])] = rand(ParametersList[i].Min:ParametersList[i].Max)
+                        end
+                    else
+                        gamp.mpSim.recruitmentSchemes[ParametersList[i].Index].ageDist = function () return 12*(rand(ParametersList[i].Min:ParametersList[i].Max)) end
+                    end
                 elseif ParametersList[i].Type == "TransProba"
                     for TransTuple in gamp.mpSim.otherStateList
                         if !contains(TransTuple[1].name, ParametersList[i].StartingState)
@@ -113,10 +135,26 @@ module GAforManSim
                 for i in 1:length(ParametersList)
                     if ParametersList[i].Type == "RecFlow"
                         # Set recruitment flows
-                        setRecruitmentFixed(gamp.mpSim.recruitmentSchemes[ParametersList[i].Index], ParametersList[i].StartVal)
+                        if length(ParametersList[i].TimeDivision) > 2
+                            gamp.mpSim.recruitmentSchemes[ParametersList[i].Index].UseRecFlowArray = true
+                            gamp.mpSim.recruitmentSchemes[ParametersList[i].Index].RecFlowArray = Int.(zeros(gamp.mpSim.simLength/12 + 1))
+                            for div in 1:(length(ParametersList[i].TimeDivision)-1)
+                                gamp.mpSim.recruitmentSchemes[ParametersList[i].Index].RecFlowArray[ParametersList[i].TimeDivision[div] + 1:((ParametersList[i].TimeDivision[div + 1] == -1)? end : 1 + ParametersList[i].TimeDivision[div + 1])] = ParametersList[i].StartVal
+                            end
+                        else
+                            setRecruitmentFixed(gamp.mpSim.recruitmentSchemes[ParametersList[i].Index], ParametersList[i].StartVal)
+                        end
                     elseif ParametersList[i].Type == "RecAge"
                         # Set recruitment age
-                        gamp.mpSim.recruitmentSchemes[ParametersList[i].Index].ageDist = function () return 12*(ParametersList[i].StartVal) end
+                        if length(ParametersList[i].TimeDivision) > 2
+                            mpSim.recruitmentSchemes[ParametersList[i].Index].UseRecAgeArray = true
+                            mpSim.recruitmentSchemes[ParametersList[i].Index].RecAgeArray = Int.(zeros(mpSim.simLength/12 + 1))
+                            for div in 1:(length(ParametersList[i].TimeDivision) - 1)
+                                mpSim.recruitmentSchemes[ParametersList[i].Index].RecAgeArray[ParametersList[i].TimeDivision[div] + 1:((ParametersList[i].TimeDivision[div + 1] == -1)? end : 1+ParametersList[i].TimeDivision[i + 1])] = ParametersList[i].StartVal
+                            end
+                        else
+                            gamp.mpSim.recruitmentSchemes[ParametersList[i].Index].ageDist = function () return 12*(ParametersList[i].StartVal) end
+                        end
                     elseif ParametersList[i].Type == "TransProba"
                         for TransTuple in gamp.mpSim.otherStateList
                             if !contains(TransTuple[1].name, ParametersList[i].StartingState)

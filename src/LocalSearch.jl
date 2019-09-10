@@ -1,4 +1,4 @@
-addprocs(4)
+#addprocs(2)
 
 
 include(joinpath( dirname( Base.source_path() ), "Functions", "sendto.jl"))
@@ -6,39 +6,56 @@ include(joinpath( dirname( Base.source_path() ), "Functions", "sendto.jl"))
 @everywhere include(joinpath( dirname( Base.source_path() ), myid()==1? "": "src", "Types", "Parameters.jl"))
 include(joinpath( dirname( Base.source_path() ), "Functions", "LocalSearchManSim.jl")) #myid()==1? "": "src",
 
+NbSimRunForEvaluation = 1
+ProbaCrossOver =  function (iteration) 1/iteration end
+
 ParametersListSLS = Array{StochasticSearch.Parameter,1}()
 
 for i in 1:length(ParametersList)
     if ParametersList[i].Type == "TransProba"
         push!(ParametersListSLS, FloatParameter(Float64(ParametersList[i].Min), Float64(ParametersList[i].Max), Float64(ParametersList[i].StartVal), string(ParametersList[i].Type, i)))
     else
-        push!(ParametersListSLS, IntegerParameter(ParametersList[i].Min, ParametersList[i].Max, Int(round(ParametersList[i].StartVal)), string(ParametersList[i].Type, i)))
+        if length(ParametersList[i].TimeDivision) > 2
+            for div in 1:(length(ParametersList[i].TimeDivision) - 1)
+                push!(ParametersListSLS, IntegerParameter(ParametersList[i].Min, ParametersList[i].Max, Int(round(ParametersList[i].StartVal)), string(ParametersList[i].Type, i, div)))
+            end
+        else
+            push!(ParametersListSLS, IntegerParameter(ParametersList[i].Min, ParametersList[i].Max, Int(round(ParametersList[i].StartVal)), string(ParametersList[i].Type, i)))
+        end
     end
 end
 
-cost_arg = Dict{Symbol, Any}(:targetList => targetList, :ParametersList => ParametersList)
+cost_arg = Dict{Symbol, Any}(:targetList => targetList, :ParametersList => ParametersList, :ProbaCrossOver => ProbaCrossOver)
 
 
 configuration = Configuration(ParametersListSLS,
                                "Manpower Recruitment Search")
 tStart = now()
-tuning_run = Run(cost               = mpSimSLS,
+tuning_run = MPRun(cost             = mpSimSLS,
                  starting_point     = configuration,
                  cost_arguments     = cost_arg,
-                 duration           = 50,
-                 report_after       = 20,
-                 methods            = [[:simulated_annealing 1];
+                 duration           = 250,
+                 report_after       = 3000,
+                 cost_evaluations   = NbSimRunForEvaluation,
+                 methods            = [[:Test41_simulated_annealing 1];
+                                       #[:Test42_simulated_annealing 1];
+                                       #[:Test43_simulated_annealing 1];
+                                       #[:Test44_simulated_annealing 1];
+                                       #[:Test45_simulated_annealing 1];
+                                       #[:Test46_simulated_annealing 1];
+                                       #[:Test47_simulated_annealing 1];
+                                       #[:Test48_simulated_annealing 1];
                                       #[:iterative_first_improvement 1];
-                                      [:simulated_annealing 1];
-                                      [:simulated_annealing 1];
-                                      [:simulated_annealing 1];
-                                      [:simulated_annealing 1];
+                                      #[:MPsimulated_annealing 1];
+                                      #[:simulated_annealing 1];
                                       #[:randomized_first_improvement 1];
                                       #[:iterative_greedy_construction 1];
                                       #[:iterative_probabilistic_improvement 1];
                                       ])
 
-search_task = @task optimize(tuning_run)
+
+BestSolsEval = Array{Any,1}()
+search_task = @task optimize(tuning_run, BestSolsEval)
 result = consume(search_task)
 
 print(result)
@@ -50,71 +67,11 @@ end
 tEnd = now()
 timeElapsed = (tEnd - tStart).value / 1000
 println( "Search ended: $timeElapsed seconds." )
-
-
-mpSim = InitMpSim
-
-
-for i in 1:length(ParametersList)
-    if ParametersList[i].Type == "RecFlow"
-        # Set recruitment flows
-        setRecruitmentFixed(mpSim.recruitmentSchemes[ParametersList[i].Index], result.minimum.parameters[string(ParametersList[i].Type, i)].value)
-    elseif ParametersList[i].Type == "RecAge"
-        # Set recruitment age
-        mpSim.recruitmentSchemes[ParametersList[i].Index].ageDist = function () return 12*(result.minimum.parameters[string(ParametersList[i].Type, i)].value) end
-    elseif ParametersList[i].Type == "TransProba"
-        for TransTuple in mpSim.otherStateList
-            if !contains(TransTuple[1].name, ParametersList[i].StartingState)
-                continue
-            end
-            for j in 1:length(TransTuple[2])
-                if TransTuple[2][j].name ==ParametersList[i].Name
-                    TransTuple[2][j].probabilityList = [result.minimum.parameters[string(ParametersList[i].Type, i)].value]
-                end
-            end
-        end
-    elseif ParametersList[i].Type == "TransTenure"
-        for TransTuple in mpSim.otherStateList
-            if !contains(TransTuple[1].name, ParametersList[i].StartingState)
-                continue
-            end
-            for j in 1:length(TransTuple[2])
-                if TransTuple[2][j].name ==ParametersList[i].Name
-                    TransTuple[2][j].extraConditions[1].val = 12*(result.minimum.parameters[string(ParametersList[i].Type, i)].value)
-                end
-            end
-        end
-    elseif ParametersList[i].Type == "PEAge"
-        # Retirement Age
-        mpSim.retirementScheme.retireAge = 12*(result.minimum.parameters[string(ParametersList[i].Type, i)].value)
-    end
+try
+#    interrupt(workers())
 end
 
-tStart = now()
-println("Running... ")
-#ExecNb += 1
-mpSim.simDB = SQLite.DB( "" )
-resetSimulation(mpSim)
-run( mpSim )
 
+plot(BestSolsEval)
 
-configFileName = joinpath( dirname( Base.source_path() ), "..", "Data", "SIMULdemo.xlsx")
-plotSimResults(mpSim, configFileName)
-
-score = Dict{String, Any}()
-
-for i in 1:length(targetList)
-    score[targetList[i].StateName] = zeros(2)
-    fluxInCounts    =  generateFluxReport( mpSim, 12,  true, targetList[i].StateName)
-    fluxOutCounts   =  generateFluxReport( mpSim, 12, false, targetList[i].StateName)
-    personnelCounts = generateCountReport( mpSim, targetList[i].StateName, fluxInCounts, fluxOutCounts )
-
-    for j in targetList[i].StartYear:length(personnelCounts[Symbol(targetList[i].StateName)])
-        tempo = personnelCounts[Symbol(targetList[i].StateName)][j] - targetList[i].Value
-        if tempo > 0
-            score[targetList[i].StateName][1] += tempo
-        else
-            score[targetList[i].StateName][2] += tempo
-        end
-    end
-end
+#include(joinpath( dirname( Base.source_path() ), "Functions", "AfterRunSLS.jl"))
